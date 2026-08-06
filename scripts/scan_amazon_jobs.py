@@ -121,6 +121,17 @@ def main():
     seen_ids = load_seen_ids()
 
     candidates = fetch_candidates(max_days_old=max_days_old)
+
+    if sample_size > 0:
+        print(f"DEBUG: fetched {len(candidates)} raw candidates before any filtering.")
+        for job in candidates[:30]:
+            company = (job.get("company", {}) or {}).get("display_name", "")
+            loc = (job.get("location", {}) or {}).get("display_name", "")
+            lat, lon = job.get("latitude"), job.get("longitude")
+            dist = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon) if lat and lon else None
+            dist_str = f"{dist:.0f}mi" if dist is not None else "no coords"
+            print(f"DEBUG: [{company}] {job.get('title')} - {loc} ({dist_str})")
+
     matching_jobs = [
         job for job in candidates if is_amazon_warehouse_operative_job(job) and within_radius(job)
     ]
