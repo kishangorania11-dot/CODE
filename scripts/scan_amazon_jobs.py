@@ -91,12 +91,12 @@ def send_telegram_message(text):
         raise RuntimeError(f"Telegram API error: {body}")
 
 
-def format_job_message(job, distance_miles):
+def format_job_message(job, distance_miles, label="New Amazon warehouse job near Leicester"):
     title = job.get("title", "Untitled role")
     location = (job.get("location", {}) or {}).get("display_name", "Unknown location")
     link = job.get("redirect_url", "")
     return (
-        f"New Amazon warehouse job near Leicester\n\n"
+        f"{label}\n\n"
         f"{title}\n"
         f"{location} (~{distance_miles:.0f} miles from Leicester)\n"
         f"{link}"
@@ -104,11 +104,22 @@ def format_job_message(job, distance_miles):
 
 
 def main():
+    sample_size = int(os.environ.get("SAMPLE_SIZE", "0"))
+
     is_first_run = not SEEN_JOBS_PATH.exists()
     seen_ids = load_seen_ids()
 
     candidates = fetch_candidates()
     matching_jobs = [job for job in candidates if is_amazon_job(job) and within_radius(job)]
+
+    if sample_size > 0:
+        for job in matching_jobs[:sample_size]:
+            lat, lon = job["latitude"], job["longitude"]
+            distance = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
+            send_telegram_message(format_job_message(job, distance, label="Amazon warehouse job near Leicester"))
+            print(f"Sent sample: {job.get('title')} ({job['id']})")
+        print(f"Sent {min(sample_size, len(matching_jobs))} sample jobs, no state changes made.")
+        return
 
     if is_first_run:
         new_jobs = []
