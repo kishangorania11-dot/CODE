@@ -33,7 +33,7 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     return 2 * r_miles * math.asin(math.sqrt(a))
 
 
-def fetch_candidates():
+def fetch_candidates(max_days_old=None):
     jobs_by_id = {}
     for term in SEARCH_TERMS:
         url = "https://api.adzuna.com/v1/api/jobs/gb/search/1"
@@ -47,6 +47,8 @@ def fetch_candidates():
             "sort_by": "date",
             "content-type": "application/json",
         }
+        if max_days_old:
+            params["max_days_old"] = max_days_old
         resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
         for job in resp.json().get("results", []):
@@ -58,7 +60,7 @@ def is_amazon_warehouse_operative_job(job):
     company = (job.get("company", {}) or {}).get("display_name", "") or ""
     title = (job.get("title", "") or "").lower()
     is_amazon = "amazon" in company.lower() or "amazon" in title
-    is_warehouse_operative = "warehouse operative" in title
+    is_warehouse_operative = "warehouse" in title and "operative" in title
     return is_amazon and is_warehouse_operative
 
 
@@ -108,20 +110,27 @@ def format_job_message(job, distance_miles, label="New Amazon Warehouse Operativ
 
 def main():
     sample_size = int(os.environ.get("SAMPLE_SIZE", "0"))
+    max_days_old = os.environ.get("MAX_DAYS_OLD") or None
 
     is_first_run = not SEEN_JOBS_PATH.exists()
     seen_ids = load_seen_ids()
 
-    candidates = fetch_candidates()
+    candidates = fetch_candidates(max_days_old=max_days_old)
     matching_jobs = [
         job for job in candidates if is_amazon_warehouse_operative_job(job) and within_radius(job)
     ]
 
     if sample_size > 0:
+        if not matching_jobs:
+            send_telegram_message(
+                "No Amazon Warehouse Operative jobs found within 40 miles of Leicester "
+                + (f"in the last {max_days_old} days." if max_days_old else "right now.")
+            )
+            print("No matching jobs to send as sample.")
         for job in matching_jobs[:sample_size]:
             lat, lon = job["latitude"], job["longitude"]
             distance = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
-            send_telegram_message(format_job_message(job, distance, label="Amazon warehouse job near Leicester"))
+            send_telegram_message(format_job_message(job, distance, label="Amazon Warehouse Operative job near Leicester"))
             print(f"Sent sample: {job.get('title')} ({job['id']})")
         print(f"Sent {min(sample_size, len(matching_jobs))} sample jobs, no state changes made.")
         return

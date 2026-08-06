@@ -9,6 +9,10 @@ on:
         description: "If set > 0, send this many currently-matching jobs to Telegram without affecting new-job tracking"
         required: false
         default: "0"
+      max_days_old:
+        description: "If set, only consider jobs posted within this many days (used with sample_size for one-off pulls)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -35,6 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SAMPLE_SIZE: ${{ github.event.inputs.sample_size || '0' }}
+          MAX_DAYS_OLD: ${{ github.event.inputs.max_days_old || '' }}
         run: python scripts/scan_amazon_jobs.py
 
       - name: Commit updated job history
