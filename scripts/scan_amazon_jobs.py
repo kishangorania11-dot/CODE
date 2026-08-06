@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Scan Adzuna for Amazon warehouse jobs within a radius of Leicester and
-notify via Telegram about any postings not seen on a previous run."""
+"""Scan Adzuna for Amazon Warehouse Operative jobs within a radius of
+Leicester and notify via Telegram about any postings not seen on a
+previous run. Also sends a status message when a run finds nothing new."""
 
 import json
 import math
@@ -13,7 +14,7 @@ import requests
 LEICESTER_LAT = 52.6369
 LEICESTER_LON = -1.1398
 MAX_DISTANCE_MILES = 40
-SEARCH_TERMS = ["amazon warehouse", "amazon fulfilment", "amazon delivery"]
+SEARCH_TERMS = ["amazon warehouse operative"]
 RESULTS_PER_PAGE = 50
 SEEN_JOBS_PATH = Path(__file__).resolve().parent.parent / "data" / "seen_jobs.json"
 
@@ -53,10 +54,12 @@ def fetch_candidates():
     return list(jobs_by_id.values())
 
 
-def is_amazon_job(job):
+def is_amazon_warehouse_operative_job(job):
     company = (job.get("company", {}) or {}).get("display_name", "") or ""
-    title = job.get("title", "") or ""
-    return "amazon" in company.lower() or "amazon" in title.lower()
+    title = (job.get("title", "") or "").lower()
+    is_amazon = "amazon" in company.lower() or "amazon" in title
+    is_warehouse_operative = "warehouse operative" in title
+    return is_amazon and is_warehouse_operative
 
 
 def within_radius(job):
@@ -91,7 +94,7 @@ def send_telegram_message(text):
         raise RuntimeError(f"Telegram API error: {body}")
 
 
-def format_job_message(job, distance_miles, label="New Amazon warehouse job near Leicester"):
+def format_job_message(job, distance_miles, label="New Amazon Warehouse Operative job near Leicester"):
     title = job.get("title", "Untitled role")
     location = (job.get("location", {}) or {}).get("display_name", "Unknown location")
     link = job.get("redirect_url", "")
@@ -110,7 +113,9 @@ def main():
     seen_ids = load_seen_ids()
 
     candidates = fetch_candidates()
-    matching_jobs = [job for job in candidates if is_amazon_job(job) and within_radius(job)]
+    matching_jobs = [
+        job for job in candidates if is_amazon_warehouse_operative_job(job) and within_radius(job)
+    ]
 
     if sample_size > 0:
         for job in matching_jobs[:sample_size]:
@@ -132,6 +137,12 @@ def main():
         distance = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
         send_telegram_message(format_job_message(job, distance))
         print(f"Notified: {job.get('title')} ({job['id']})")
+
+    if not is_first_run and not new_jobs:
+        send_telegram_message(
+            "No new Amazon Warehouse Operative jobs within 40 miles of Leicester this hour."
+        )
+        print("No new jobs this run, sent status message.")
 
     all_current_ids = seen_ids | {str(job["id"]) for job in matching_jobs}
     save_seen_ids(all_current_ids)
