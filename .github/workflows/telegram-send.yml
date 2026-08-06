@@ -1,0 +1,19 @@
+name: Telegram Send
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Message text to send to Telegram"
+        required: true
+
+jobs:
+  send-message:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram message
+        run: |
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            --data-urlencode chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode text="${{ github.event.inputs.message }}" \
+            -d disable_web_page_preview=true
