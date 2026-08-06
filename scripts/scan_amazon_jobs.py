@@ -14,8 +14,9 @@ import requests
 LEICESTER_LAT = 52.6369
 LEICESTER_LON = -1.1398
 MAX_DISTANCE_MILES = 40
-SEARCH_TERMS = ["amazon warehouse operative"]
+SEARCH_TERMS = ["amazon"]
 RESULTS_PER_PAGE = 50
+MAX_PAGES = 4
 SEEN_JOBS_PATH = Path(__file__).resolve().parent.parent / "data" / "seen_jobs.json"
 
 ADZUNA_APP_ID = os.environ["ADZUNA_APP_ID"]
@@ -36,23 +37,27 @@ def haversine_miles(lat1, lon1, lat2, lon2):
 def fetch_candidates(max_days_old=None):
     jobs_by_id = {}
     for term in SEARCH_TERMS:
-        url = "https://api.adzuna.com/v1/api/jobs/gb/search/1"
-        params = {
-            "app_id": ADZUNA_APP_ID,
-            "app_key": ADZUNA_APP_KEY,
-            "what": term,
-            "where": "Leicester",
-            "distance": 80,
-            "results_per_page": RESULTS_PER_PAGE,
-            "sort_by": "date",
-            "content-type": "application/json",
-        }
-        if max_days_old:
-            params["max_days_old"] = max_days_old
-        resp = requests.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        for job in resp.json().get("results", []):
-            jobs_by_id[job["id"]] = job
+        for page in range(1, MAX_PAGES + 1):
+            url = f"https://api.adzuna.com/v1/api/jobs/gb/search/{page}"
+            params = {
+                "app_id": ADZUNA_APP_ID,
+                "app_key": ADZUNA_APP_KEY,
+                "what": term,
+                "where": "Leicester",
+                "distance": 80,
+                "results_per_page": RESULTS_PER_PAGE,
+                "sort_by": "date",
+                "content-type": "application/json",
+            }
+            if max_days_old:
+                params["max_days_old"] = max_days_old
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            if not results:
+                break
+            for job in results:
+                jobs_by_id[job["id"]] = job
     return list(jobs_by_id.values())
 
 
