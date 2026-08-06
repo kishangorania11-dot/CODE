@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
+    inputs:
+      sample_size:
+        description: "If set > 0, send this many currently-matching jobs to Telegram without affecting new-job tracking"
+        required: false
+        default: "0"
 
 permissions:
   contents: write
@@ -29,6 +34,7 @@ jobs:
           ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SAMPLE_SIZE: ${{ github.event.inputs.sample_size || '0' }}
         run: python scripts/scan_amazon_jobs.py
 
       - name: Commit updated job history
