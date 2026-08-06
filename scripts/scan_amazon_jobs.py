@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Scan Adzuna for Amazon Warehouse Operative jobs within a radius of
-Leicester and notify via Telegram about any postings not seen on a
-previous run. Also sends a status message when a run finds nothing new."""
+Leicester paying at least MIN_HOURLY_RATE, and notify via Telegram about
+any postings not seen on a previous run. Also sends a status message when
+a run finds nothing new. Jobs with no listed salary are still included
+(can't verify their rate either way) but flagged in the message."""
 
 import json
 import math
@@ -14,6 +16,9 @@ import requests
 LEICESTER_LAT = 52.6369
 LEICESTER_LON = -1.1398
 MAX_DISTANCE_MILES = 40
+MIN_HOURLY_RATE = 14.30
+ASSUMED_ANNUAL_HOURS = 37.5 * 52  # full-time equivalent, used to interpret Adzuna's annualized salary_min
+MIN_ANNUAL_SALARY = MIN_HOURLY_RATE * ASSUMED_ANNUAL_HOURS
 SEARCH_TERMS = ["amazon"]
 RESULTS_PER_PAGE = 50
 MAX_PAGES = 4
@@ -77,6 +82,22 @@ def within_radius(job):
     return haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon) <= MAX_DISTANCE_MILES
 
 
+def meets_min_salary(job):
+    """True if salary data is missing (can't verify, so don't exclude) or
+    the listed salary implies at least MIN_HOURLY_RATE per hour."""
+    salary_min = job.get("salary_min")
+    if not salary_min:
+        return True
+    return salary_min >= MIN_ANNUAL_SALARY
+
+
+def implied_hourly_rate(job):
+    salary_min = job.get("salary_min")
+    if not salary_min:
+        return None
+    return salary_min / ASSUMED_ANNUAL_HOURS
+
+
 def load_seen_ids():
     if SEEN_JOBS_PATH.exists():
         return set(json.loads(SEEN_JOBS_PATH.read_text()))
@@ -105,10 +126,13 @@ def format_job_message(job, distance_miles, label="New Amazon Warehouse Operativ
     title = job.get("title", "Untitled role")
     location = (job.get("location", {}) or {}).get("display_name", "Unknown location")
     link = job.get("redirect_url", "")
+    hourly = implied_hourly_rate(job)
+    pay_line = f"~£{hourly:.2f}/hr (estimated from listing)" if hourly else "Pay not listed — verify on application page"
     return (
         f"{label}\n\n"
         f"{title}\n"
         f"{location} (~{distance_miles:.0f} miles from Leicester)\n"
+        f"{pay_line}\n"
         f"{link}"
     )
 
@@ -133,7 +157,9 @@ def main():
             print(f"DEBUG: [{company}] {job.get('title')} - {loc} ({dist_str})")
 
     matching_jobs = [
-        job for job in candidates if is_amazon_warehouse_operative_job(job) and within_radius(job)
+        job
+        for job in candidates
+        if is_amazon_warehouse_operative_job(job) and within_radius(job) and meets_min_salary(job)
     ]
 
     if sample_size > 0:
