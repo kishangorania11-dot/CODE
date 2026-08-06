@@ -16,7 +16,7 @@ import requests
 LEICESTER_LAT = 52.6369
 LEICESTER_LON = -1.1398
 MAX_DISTANCE_MILES = 40
-MIN_HOURLY_RATE = 14.30
+MIN_HOURLY_RATE = 12.30
 ASSUMED_ANNUAL_HOURS = 37.5 * 52  # full-time equivalent, used to interpret Adzuna's annualized salary_min
 MIN_ANNUAL_SALARY = MIN_HOURLY_RATE * ASSUMED_ANNUAL_HOURS
 SEARCH_TERMS = ["amazon"]
