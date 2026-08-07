@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Scan Adzuna for Amazon Warehouse Operative jobs within a radius of
-Leicester paying at least MIN_HOURLY_RATE, and notify via Telegram about
-any postings not seen on a previous run. Also sends a status message when
-a run finds nothing new. Jobs with no listed salary are still included
-(can't verify their rate either way) but flagged in the message."""
+"""Scan Adzuna for Amazon Warehouse Operative / Delivery Station Warehouse
+Associate jobs within a radius of Leicester paying at least MIN_HOURLY_RATE,
+and notify via Telegram about any postings not seen on a previous run. Also
+sends a status message when a run finds nothing new. Jobs with no listed
+salary are still included (can't verify their rate either way) but flagged
+in the message."""
 
 import json
 import math
@@ -66,12 +67,15 @@ def fetch_candidates(max_days_old=None):
     return list(jobs_by_id.values())
 
 
-def is_amazon_warehouse_operative_job(job):
+def is_target_amazon_job(job):
     company = (job.get("company", {}) or {}).get("display_name", "") or ""
     title = (job.get("title", "") or "").lower()
     is_amazon = "amazon" in company.lower() or "amazon" in title
     is_warehouse_operative = "warehouse" in title and "operative" in title
-    return is_amazon and is_warehouse_operative
+    is_delivery_station_associate = (
+        "delivery station" in title and "warehouse" in title and "associate" in title
+    )
+    return is_amazon and (is_warehouse_operative or is_delivery_station_associate)
 
 
 def within_radius(job):
@@ -122,7 +126,7 @@ def send_telegram_message(text):
         raise RuntimeError(f"Telegram API error: {body}")
 
 
-def format_job_message(job, distance_miles, label="New Amazon Warehouse Operative job near Leicester"):
+def format_job_message(job, distance_miles, label="New Amazon job near Leicester"):
     title = job.get("title", "Untitled role")
     location = (job.get("location", {}) or {}).get("display_name", "Unknown location")
     link = job.get("redirect_url", "")
@@ -159,20 +163,20 @@ def main():
     matching_jobs = [
         job
         for job in candidates
-        if is_amazon_warehouse_operative_job(job) and within_radius(job) and meets_min_salary(job)
+        if is_target_amazon_job(job) and within_radius(job) and meets_min_salary(job)
     ]
 
     if sample_size > 0:
         if not matching_jobs:
             send_telegram_message(
-                "No Amazon Warehouse Operative jobs found within 40 miles of Leicester "
+                "No Amazon Warehouse Operative / Delivery Station Warehouse Associate jobs found within 40 miles of Leicester "
                 + (f"in the last {max_days_old} days." if max_days_old else "right now.")
             )
             print("No matching jobs to send as sample.")
         for job in matching_jobs[:sample_size]:
             lat, lon = job["latitude"], job["longitude"]
             distance = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
-            send_telegram_message(format_job_message(job, distance, label="Amazon Warehouse Operative job near Leicester"))
+            send_telegram_message(format_job_message(job, distance, label="Amazon job near Leicester"))
             print(f"Sent sample: {job.get('title')} ({job['id']})")
         print(f"Sent {min(sample_size, len(matching_jobs))} sample jobs, no state changes made.")
         return
@@ -191,7 +195,7 @@ def main():
 
     if not is_first_run and not new_jobs:
         send_telegram_message(
-            "No new Amazon Warehouse Operative jobs within 40 miles of Leicester this hour."
+            "No new Amazon Warehouse Operative / Delivery Station Warehouse Associate jobs within 40 miles of Leicester this hour."
         )
         print("No new jobs this run, sent status message.")
 
