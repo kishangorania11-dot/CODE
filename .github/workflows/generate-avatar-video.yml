@@ -1,0 +1,48 @@
+name: Generate Avatar Video
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "content/avatar/audio/**"
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install gradio_client==1.4.3
+
+      - name: Find newest audio file
+        id: audio
+        run: |
+          latest=$(ls -t content/avatar/audio/*.mp3 content/avatar/audio/*.wav content/avatar/audio/*.m4a 2>/dev/null | head -n 1)
+          if [ -z "$latest" ]; then
+            echo "No audio file found in content/avatar/audio/"
+            exit 1
+          fi
+          echo "path=$latest" >> "$GITHUB_OUTPUT"
+          echo "Using audio file: $latest"
+
+      - name: Generate video
+        run: |
+          python scripts/generate_avatar_video.py \
+            content/avatar/photo.jpg \
+            "${{ steps.audio.outputs.path }}" \
+            output/avatar_video.mp4
+
+      - name: Upload video as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatar-video
+          path: output/avatar_video.mp4
+          retention-days: 14
