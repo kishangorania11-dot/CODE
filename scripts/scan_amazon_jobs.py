@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Scan Adzuna for Amazon Warehouse Operative / Delivery Station Warehouse
-Associate jobs within a radius of Leicester paying at least MIN_HOURLY_RATE,
-and notify via Telegram about any postings not seen on a previous run. Also
-sends a status message when a run finds nothing new. Jobs with no listed
-salary are still included (can't verify their rate either way) but flagged
-in the message."""
+"""Scan Adzuna for Amazon warehouse-tier jobs (Warehouse Operative,
+Delivery Station Warehouse Associate, Sortation Operative, Amazon Fresh
+Warehouse Team Member, Stower, Problem Solver, Dock Associate - see
+TARGET_ROLE_KEYWORDS) within a radius of Leicester paying at least
+MIN_HOURLY_RATE, and notify via Telegram about any postings not seen on a
+previous run. Also sends a status message when a run finds nothing new.
+Jobs with no listed salary are still included (can't verify their rate
+either way) but flagged in the message."""
 
 import json
 import math
@@ -67,15 +69,25 @@ def fetch_candidates(max_days_old=None):
     return list(jobs_by_id.values())
 
 
+TARGET_ROLE_KEYWORDS = [
+    ("warehouse", "operative"),  # Warehouse Operative
+    ("delivery station", "warehouse", "associate"),  # (Amazon) Delivery Station Warehouse Associate
+    ("sortation", "operative"),  # Sortation Operative
+    ("warehouse", "team member"),  # Amazon Fresh Warehouse Team Member
+    ("stower",),  # Stower
+    ("problem solver",),  # Problem Solver
+    ("dock associate",),  # Dock Associate
+]
+
+
 def is_target_amazon_job(job):
     company = (job.get("company", {}) or {}).get("display_name", "") or ""
     title = (job.get("title", "") or "").lower()
     is_amazon = "amazon" in company.lower() or "amazon" in title
-    is_warehouse_operative = "warehouse" in title and "operative" in title
-    is_delivery_station_associate = (
-        "delivery station" in title and "warehouse" in title and "associate" in title
+    matches_target_role = any(
+        all(keyword in title for keyword in keywords) for keywords in TARGET_ROLE_KEYWORDS
     )
-    return is_amazon and (is_warehouse_operative or is_delivery_station_associate)
+    return is_amazon and matches_target_role
 
 
 def within_radius(job):
@@ -169,7 +181,7 @@ def main():
     if sample_size > 0:
         if not matching_jobs:
             send_telegram_message(
-                "No Amazon Warehouse Operative / Delivery Station Warehouse Associate jobs found within 40 miles of Leicester "
+                "No Amazon warehouse-tier jobs found within 40 miles of Leicester "
                 + (f"in the last {max_days_old} days." if max_days_old else "right now.")
             )
             print("No matching jobs to send as sample.")
@@ -195,7 +207,7 @@ def main():
 
     if not is_first_run and not new_jobs:
         send_telegram_message(
-            "No new Amazon Warehouse Operative / Delivery Station Warehouse Associate jobs within 40 miles of Leicester this hour."
+            "No new Amazon warehouse-tier jobs within 40 miles of Leicester this hour."
         )
         print("No new jobs this run, sent status message.")
 
