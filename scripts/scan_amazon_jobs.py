@@ -3,9 +3,11 @@
 Delivery Station Warehouse Associate, Sortation Operative, Amazon Fresh
 Warehouse Team Member, Stower, Problem Solver, Dock Associate, and other
 warehouse/associate title variants - see TARGET_ROLE_KEYWORDS and
-GENERIC_WAREHOUSE_ROLE_WORDS) within a radius of Leicester paying at
-least MIN_HOURLY_RATE, and notify via Telegram about any postings not
-seen on a previous run. Also sends a status message when a run finds
+GENERIC_WAREHOUSE_ROLE_WORDS) anywhere in the UK paying at least
+MIN_HOURLY_RATE, and notify via Telegram about any postings not seen on a
+previous run. Jobs within PRIORITY_DISTANCE_MILES of Leicester are
+flagged as priority in the message; everything else nationwide is still
+sent, just without the flag. Also sends a status message when a run finds
 nothing new. Jobs with no listed salary are still included (can't verify
 their rate either way) but flagged in the message."""
 
@@ -20,13 +22,13 @@ import requests
 
 LEICESTER_LAT = 52.6369
 LEICESTER_LON = -1.1398
-MAX_DISTANCE_MILES = 60
+PRIORITY_DISTANCE_MILES = 50
 MIN_HOURLY_RATE = 12.30
 ASSUMED_ANNUAL_HOURS = 37.5 * 52  # full-time equivalent, used to interpret Adzuna's annualized salary_min
 MIN_ANNUAL_SALARY = MIN_HOURLY_RATE * ASSUMED_ANNUAL_HOURS
 SEARCH_TERMS = ["amazon"]
 RESULTS_PER_PAGE = 50
-MAX_PAGES = 4
+MAX_PAGES = 10
 MAX_FETCH_RETRIES = 3
 RETRY_BACKOFF_SECONDS = (2, 4, 8)
 SEEN_JOBS_PATH = Path(__file__).resolve().parent.parent / "data" / "seen_jobs.json"
@@ -65,6 +67,8 @@ def get_with_retry(url, params):
 
 
 def fetch_candidates(max_days_old=None):
+    """Search Adzuna nationwide (no location restriction) so jobs anywhere
+    in the UK are found, not just near Leicester."""
     jobs_by_id = {}
     for term in SEARCH_TERMS:
         for page in range(1, MAX_PAGES + 1):
@@ -73,8 +77,6 @@ def fetch_candidates(max_days_old=None):
                 "app_id": ADZUNA_APP_ID,
                 "app_key": ADZUNA_APP_KEY,
                 "what": term,
-                "where": "Leicester",
-                "distance": 80,
                 "results_per_page": RESULTS_PER_PAGE,
                 "sort_by": "date",
                 "content-type": "application/json",
@@ -119,12 +121,18 @@ def is_target_amazon_job(job):
     return is_amazon and (matches_specific_role or matches_generic_role)
 
 
-def within_radius(job):
+def distance_from_leicester(job):
+    """Miles from Leicester, or None if the job has no coordinates."""
     lat = job.get("latitude")
     lon = job.get("longitude")
     if lat is None or lon is None:
-        return False
-    return haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon) <= MAX_DISTANCE_MILES
+        return None
+    return haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
+
+
+def is_priority(job):
+    dist = distance_from_leicester(job)
+    return dist is not None and dist <= PRIORITY_DISTANCE_MILES
 
 
 def meets_min_salary(job):
@@ -167,16 +175,26 @@ def send_telegram_message(text):
         raise RuntimeError(f"Telegram API error: {body}")
 
 
-def format_job_message(job, distance_miles, label="New Amazon job near Leicester"):
+def format_job_message(job, label="New Amazon job"):
     title = job.get("title", "Untitled role")
     location = (job.get("location", {}) or {}).get("display_name", "Unknown location")
     link = job.get("redirect_url", "")
     hourly = implied_hourly_rate(job)
     pay_line = f"~£{hourly:.2f}/hr (estimated from listing)" if hourly else "Pay not listed — verify on application page"
+
+    dist = distance_from_leicester(job)
+    if dist is not None and dist <= PRIORITY_DISTANCE_MILES:
+        distance_line = f"⭐ PRIORITY — {dist:.0f} miles from Leicester"
+    elif dist is not None:
+        distance_line = f"{dist:.0f} miles from Leicester"
+    else:
+        distance_line = "Distance from Leicester unknown"
+
     return (
         f"{label}\n\n"
         f"{title}\n"
-        f"{location} (~{distance_miles:.0f} miles from Leicester)\n"
+        f"{location}\n"
+        f"{distance_line}\n"
         f"{pay_line}\n"
         f"{link}"
     )
@@ -196,28 +214,22 @@ def main():
         for job in candidates[:30]:
             company = (job.get("company", {}) or {}).get("display_name", "")
             loc = (job.get("location", {}) or {}).get("display_name", "")
-            lat, lon = job.get("latitude"), job.get("longitude")
-            dist = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon) if lat and lon else None
+            dist = distance_from_leicester(job)
             dist_str = f"{dist:.0f}mi" if dist is not None else "no coords"
             print(f"DEBUG: [{company}] {job.get('title')} - {loc} ({dist_str})")
 
     matching_jobs = [
-        job
-        for job in candidates
-        if is_target_amazon_job(job) and within_radius(job) and meets_min_salary(job)
+        job for job in candidates if is_target_amazon_job(job) and meets_min_salary(job)
     ]
+    # Priority (Leicester-area) jobs first, then the rest.
+    matching_jobs.sort(key=lambda job: not is_priority(job))
 
     if sample_size > 0:
         if not matching_jobs:
-            send_telegram_message(
-                "No Amazon warehouse-tier jobs found within 60 miles of Leicester "
-                + (f"in the last {max_days_old} days." if max_days_old else "right now.")
-            )
+            send_telegram_message("No Amazon warehouse-tier jobs found in the UK right now.")
             print("No matching jobs to send as sample.")
         for job in matching_jobs[:sample_size]:
-            lat, lon = job["latitude"], job["longitude"]
-            distance = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
-            send_telegram_message(format_job_message(job, distance, label="Amazon job near Leicester"))
+            send_telegram_message(format_job_message(job, label="Amazon job"))
             print(f"Sent sample: {job.get('title')} ({job['id']})")
         print(f"Sent {min(sample_size, len(matching_jobs))} sample jobs, no state changes made.")
         return
@@ -229,15 +241,11 @@ def main():
         new_jobs = [job for job in matching_jobs if str(job["id"]) not in seen_ids]
 
     for job in new_jobs:
-        lat, lon = job["latitude"], job["longitude"]
-        distance = haversine_miles(LEICESTER_LAT, LEICESTER_LON, lat, lon)
-        send_telegram_message(format_job_message(job, distance))
+        send_telegram_message(format_job_message(job))
         print(f"Notified: {job.get('title')} ({job['id']})")
 
     if not is_first_run and not new_jobs:
-        send_telegram_message(
-            "No new Amazon warehouse-tier jobs within 60 miles of Leicester this hour."
-        )
+        send_telegram_message("No new Amazon warehouse-tier jobs in the UK this hour.")
         print("No new jobs this run, sent status message.")
 
     all_current_ids = seen_ids | {str(job["id"]) for job in matching_jobs}
