@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Scan Adzuna for Amazon warehouse-tier jobs (Warehouse Operative,
 Delivery Station Warehouse Associate, Sortation Operative, Amazon Fresh
-Warehouse Team Member, Stower, Problem Solver, Dock Associate - see
-TARGET_ROLE_KEYWORDS) within a radius of Leicester paying at least
-MIN_HOURLY_RATE, and notify via Telegram about any postings not seen on a
-previous run. Also sends a status message when a run finds nothing new.
-Jobs with no listed salary are still included (can't verify their rate
-either way) but flagged in the message."""
+Warehouse Team Member, Stower, Problem Solver, Dock Associate, and other
+warehouse/associate title variants - see TARGET_ROLE_KEYWORDS and
+GENERIC_WAREHOUSE_ROLE_WORDS) within a radius of Leicester paying at
+least MIN_HOURLY_RATE, and notify via Telegram about any postings not
+seen on a previous run. Also sends a status message when a run finds
+nothing new. Jobs with no listed salary are still included (can't verify
+their rate either way) but flagged in the message."""
 
 import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 import requests
@@ -25,6 +27,8 @@ MIN_ANNUAL_SALARY = MIN_HOURLY_RATE * ASSUMED_ANNUAL_HOURS
 SEARCH_TERMS = ["amazon"]
 RESULTS_PER_PAGE = 50
 MAX_PAGES = 4
+MAX_FETCH_RETRIES = 3
+RETRY_BACKOFF_SECONDS = (2, 4, 8)
 SEEN_JOBS_PATH = Path(__file__).resolve().parent.parent / "data" / "seen_jobs.json"
 
 ADZUNA_APP_ID = os.environ["ADZUNA_APP_ID"]
@@ -40,6 +44,24 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     d_lambda = math.radians(lon2 - lon1)
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     return 2 * r_miles * math.asin(math.sqrt(a))
+
+
+def get_with_retry(url, params):
+    """Adzuna occasionally returns transient 503s; retry a few times with
+    backoff before giving up, so a brief outage doesn't kill the whole run."""
+    last_exc = None
+    for attempt in range(MAX_FETCH_RETRIES):
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            if resp.status_code >= 500:
+                raise requests.HTTPError(f"{resp.status_code} Server Error", response=resp)
+            resp.raise_for_status()
+            return resp
+        except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+            if attempt < MAX_FETCH_RETRIES - 1:
+                time.sleep(RETRY_BACKOFF_SECONDS[attempt])
+    raise last_exc
 
 
 def fetch_candidates(max_days_old=None):
@@ -59,8 +81,7 @@ def fetch_candidates(max_days_old=None):
             }
             if max_days_old:
                 params["max_days_old"] = max_days_old
-            resp = requests.get(url, params=params, timeout=30)
-            resp.raise_for_status()
+            resp = get_with_retry(url, params)
             results = resp.json().get("results", [])
             if not results:
                 break
@@ -79,15 +100,23 @@ TARGET_ROLE_KEYWORDS = [
     ("dock associate",),  # Dock Associate
 ]
 
+# Fallback for legitimate title variants that don't match the exact phrases
+# above (e.g. "Fulfilment Centre Warehouse Associate") - any "warehouse"
+# title paired with a generic hourly-role word still counts.
+GENERIC_WAREHOUSE_ROLE_WORDS = ("operative", "associate", "team member")
+
 
 def is_target_amazon_job(job):
     company = (job.get("company", {}) or {}).get("display_name", "") or ""
     title = (job.get("title", "") or "").lower()
     is_amazon = "amazon" in company.lower() or "amazon" in title
-    matches_target_role = any(
+    matches_specific_role = any(
         all(keyword in title for keyword in keywords) for keywords in TARGET_ROLE_KEYWORDS
     )
-    return is_amazon and matches_target_role
+    matches_generic_role = "warehouse" in title and any(
+        word in title for word in GENERIC_WAREHOUSE_ROLE_WORDS
+    )
+    return is_amazon and (matches_specific_role or matches_generic_role)
 
 
 def within_radius(job):
