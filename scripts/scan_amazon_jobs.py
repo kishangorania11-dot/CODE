@@ -18,7 +18,7 @@ import requests
 
 LEICESTER_LAT = 52.6369
 LEICESTER_LON = -1.1398
-MAX_DISTANCE_MILES = 40
+MAX_DISTANCE_MILES = 60
 MIN_HOURLY_RATE = 12.30
 ASSUMED_ANNUAL_HOURS = 37.5 * 52  # full-time equivalent, used to interpret Adzuna's annualized salary_min
 MIN_ANNUAL_SALARY = MIN_HOURLY_RATE * ASSUMED_ANNUAL_HOURS
@@ -181,7 +181,7 @@ def main():
     if sample_size > 0:
         if not matching_jobs:
             send_telegram_message(
-                "No Amazon warehouse-tier jobs found within 40 miles of Leicester "
+                "No Amazon warehouse-tier jobs found within 60 miles of Leicester "
                 + (f"in the last {max_days_old} days." if max_days_old else "right now.")
             )
             print("No matching jobs to send as sample.")
@@ -207,7 +207,7 @@ def main():
 
     if not is_first_run and not new_jobs:
         send_telegram_message(
-            "No new Amazon warehouse-tier jobs within 40 miles of Leicester this hour."
+            "No new Amazon warehouse-tier jobs within 60 miles of Leicester this hour."
         )
         print("No new jobs this run, sent status message.")
 
